@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.2] - 2026-03-30
+
+### Changed
+
+- **Pin numpy < 2.0**: pyCycle 4.4.0 has pervasive numpy 2.x incompatibilities
+  across `ThermoAdd`, `PropsRHS`, `PropsCalcs`, and other classes. The monkey-patch
+  approach only covers a few sites. Pinning `numpy>=1.26,<2.0` is the reliable fix.
+
+- **Add om-pycycle to `[full]` extra**: `pip install -e .[full]` now installs
+  `om-pycycle>=4.0.0` alongside `openmdao>=3.27.0`, giving a complete environment
+  for real cycle computation.
+
 ## [0.2.1] - 2026-03-30
 
 ### Fixed

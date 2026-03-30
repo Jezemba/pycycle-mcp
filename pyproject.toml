@@ -19,7 +19,7 @@ dependencies = [
   "anyio>=4.0.0,<5.0.0",
   "fastmcp~=2.13.1",
   "pydantic>=2.6.0,<3.0.0",
-  "numpy>=1.26",
+  "numpy>=1.26,<2.0",
 ]
 
 [project.urls]
@@ -31,6 +31,7 @@ Documentation = "https://cmudrc.github.io/pycycle-mcp/"
 [project.optional-dependencies]
 full = [
   "openmdao>=3.27.0",
+  "om-pycycle>=4.0.0",
 ]
 dev = [
   "pytest>=7.4",
