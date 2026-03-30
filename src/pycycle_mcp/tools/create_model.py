@@ -16,6 +16,196 @@ from ..utils import (
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _patch_pycycle_numpy2_compat() -> None:
+    """Patch pyCycle CEA thermo classes for numpy >= 2.0 compatibility.
+
+    numpy 2.x no longer allows assigning a 1-d array into a scalar slot
+    (e.g. ``out[i] = arr`` where ``arr.shape == (1,)``).  pyCycle 4.4
+    uses ``inputs['n_moles']`` (shape (1,)) in scalar contexts throughout
+    ``PropsRHS.compute`` and ``PropsCalcs.compute / compute_partials``.
+
+    This function monkey-patches both classes so ``n_moles`` is extracted
+    as a Python float via ``.item()`` before use.
+    """
+    try:
+        import numpy as np
+        from pycycle.thermo.cea.props_rhs import PropsRHS
+        from pycycle.thermo.cea.props_calcs import PropsCalcs
+    except ImportError:
+        return  # pycycle not installed; nothing to patch
+
+    # --- PropsRHS.compute ---
+    def _patched_props_rhs_compute(self, inputs, outputs):  # type: ignore[no-untyped-def]
+        thermo = self.thermo
+        num_element = thermo.num_element
+        T = inputs['T']
+        n = inputs['n']
+        b0 = inputs['composition']
+
+        for i in range(num_element):
+            outputs['lhs_TP'][i][:num_element] = np.dot(thermo.aij_prod[i], n)
+
+        outputs['lhs_TP'][num_element, :num_element] = b0
+        outputs['lhs_TP'][:num_element, num_element] = b0
+        outputs['lhs_TP'][num_element, num_element] = 0
+
+        outputs['rhs_P'][:num_element] = b0
+        n_moles = inputs['n_moles']
+        outputs['rhs_P'][num_element] = n_moles.item() if hasattr(n_moles, 'item') else n_moles
+
+        self.H0_T = H0_T = thermo.H0(T)
+        n_H0 = n * H0_T
+        outputs['rhs_T'][:num_element] = np.sum(thermo.aij * n_H0, axis=1)
+        outputs['rhs_T'][num_element] = np.sum(n_H0)
+
+    PropsRHS.compute = _patched_props_rhs_compute  # type: ignore[assignment]
+
+    # --- PropsCalcs: rewrite compute and compute_partials to use scalar n_moles ---
+    from pycycle.constants import P_REF, R_UNIVERSAL_ENG, R_UNIVERSAL_SI, MIN_VALID_CONCENTRATION
+
+    def _patched_calcs_compute(self, inputs, outputs):  # type: ignore[no-untyped-def]
+        thermo = self.options['thermo']
+        num_prod = thermo.num_prod
+        num_element = thermo.num_element
+
+        T = inputs['T']
+        P = inputs['P']
+        result_T = inputs['result_T']
+        nj = inputs['n'][:num_prod]
+        n_moles = inputs['n_moles'].item() if hasattr(inputs['n_moles'], 'item') else inputs['n_moles']
+
+        self.dlnVqdlnP = dlnVqdlnP = -1 + inputs['result_P'][num_element]
+        self.dlnVqdlnT = dlnVqdlnT = 1 - result_T[num_element]
+
+        self.Cp0_T = Cp0_T = thermo.Cp0(T)
+        Cpf = np.sum(nj * Cp0_T)
+        self.H0_T = H0_T = thermo.H0(T)
+        self.S0_T = S0_T = thermo.S0(T)
+        self.nj_H0 = nj_H0 = nj * H0_T
+
+        Cpe = -np.sum(np.sum(thermo.aij * nj_H0, axis=1) * result_T[:num_element])
+        Cpe += np.sum(nj_H0 * H0_T)
+        Cpe -= np.sum(nj_H0) * result_T[num_element]
+
+        outputs['h'] = np.sum(nj_H0) * R_UNIVERSAL_ENG * T
+        try:
+            val = S0_T + np.log(n_moles / nj / (P / P_REF))
+        except FloatingPointError:
+            P = 1e-5
+            val = S0_T + np.log(n_moles / nj / (P / P_REF))
+
+        outputs['S'] = R_UNIVERSAL_ENG * np.sum(nj * val)
+        outputs['Cp'] = Cp = (Cpe + Cpf) * R_UNIVERSAL_ENG
+        outputs['Cv'] = Cv = Cp + n_moles * R_UNIVERSAL_ENG * dlnVqdlnT ** 2 / dlnVqdlnP
+        outputs['gamma'] = -1 * Cp / Cv / dlnVqdlnP
+        outputs['rho'] = P / (n_moles * R_UNIVERSAL_SI * T) * 100
+        outputs['R'] = R_UNIVERSAL_SI * n_moles
+
+    def _patched_calcs_partials(self, inputs, J):  # type: ignore[no-untyped-def]
+        thermo = self.options['thermo']
+        num_prod = thermo.num_prod
+        num_element = thermo.num_element
+
+        T = inputs['T']
+        P = inputs['P']
+        nj = inputs['n']
+        n_moles = inputs['n_moles'].item() if hasattr(inputs['n_moles'], 'item') else inputs['n_moles']
+        result_T = inputs['result_T']
+        result_T_last = result_T[num_element]
+        result_T_rest = result_T[:num_element]
+
+        dlnVqdlnP = -1 + inputs['result_P'][num_element]
+        dlnVqdlnT = 1 - result_T_last
+
+        Cp0_T = thermo.Cp0(T)
+        Cpf = np.sum(nj * Cp0_T)
+        H0_T = thermo.H0(T)
+        S0_T = thermo.S0(T)
+        nj_H0 = nj * H0_T
+
+        Cpe = -np.sum(np.sum(thermo.aij * nj_H0, axis=1) * result_T_rest)
+        Cpe += np.sum(nj_H0 * H0_T)
+        Cpe -= np.sum(nj_H0) * result_T_last
+
+        Cp = (Cpe + Cpf) * R_UNIVERSAL_ENG
+        Cv = Cp + n_moles * R_UNIVERSAL_ENG * dlnVqdlnT ** 2 / dlnVqdlnP
+
+        dH0_dT = thermo.H0_applyJ(T, 1.)
+        dS0_dT = thermo.S0_applyJ(T, 1.)
+        dCp0_dT = thermo.Cp0_applyJ(T, 1.)
+        sum_nj_R = n_moles * R_UNIVERSAL_SI
+
+        dCpe_dT = 2 * np.sum(nj * H0_T * dH0_dT)
+        dCpe_dT -= np.sum(np.sum(thermo.aij * nj * dH0_dT, axis=1) * result_T_rest)
+        dCpe_dT -= np.sum(nj * dH0_dT) * result_T_last
+
+        dCpf_dT = np.sum(nj * dCp0_dT)
+
+        J['h', 'T'] = R_UNIVERSAL_ENG * (np.sum(nj * dH0_dT) * T + np.sum(nj * H0_T))
+        J['h', 'n'] = R_UNIVERSAL_ENG * T * H0_T
+
+        J['S', 'n'] = R_UNIVERSAL_ENG * (S0_T + np.log(n_moles) - np.log(P / P_REF) - np.log(nj) - 1)
+        _trace = np.where(nj <= MIN_VALID_CONCENTRATION + 1e-20)
+        J['S', 'n'][0, _trace] = 0
+        J['S', 'T'] = R_UNIVERSAL_ENG * np.sum(nj * dS0_dT)
+        J['S', 'P'] = -R_UNIVERSAL_ENG * np.sum(nj / P)
+        J['S', 'n_moles'] = R_UNIVERSAL_ENG * np.sum(nj) / n_moles
+        J['rho', 'T'] = -P / (sum_nj_R * T ** 2) * 100
+        J['rho', 'n_moles'] = -P / (n_moles ** 2 * R_UNIVERSAL_SI * T) * 100
+        J['rho', 'P'] = 1 / (sum_nj_R * T) * 100
+
+        dCp_dnj = R_UNIVERSAL_ENG * (Cp0_T + H0_T ** 2)
+        for j in range(num_prod):
+            for i in range(num_element):
+                dCp_dnj[j] -= R_UNIVERSAL_ENG * thermo.aij[i][j] * H0_T[j] * result_T[i]
+        dCp_dnj -= R_UNIVERSAL_ENG * H0_T * result_T_last
+        J['Cp', 'n'] = dCp_dnj
+
+        dCp_dresultT = np.zeros(num_element + 1)
+        dCp_dresultT[:num_element] = -R_UNIVERSAL_ENG * np.sum(thermo.aij * nj_H0, axis=1)
+        dCp_dresultT[num_element] = -R_UNIVERSAL_ENG * np.sum(nj_H0)
+        J['Cp', 'result_T'] = dCp_dresultT
+
+        dCp_dT = (dCpe_dT + dCpf_dT) * R_UNIVERSAL_ENG
+        J['Cp', 'T'] = dCp_dT
+
+        J['Cv', 'n'] = dCp_dnj
+
+        dCv_dnmoles = R_UNIVERSAL_ENG * dlnVqdlnT ** 2 / dlnVqdlnP
+        J['Cv', 'n_moles'] = dCv_dnmoles
+        J['Cv', 'T'] = dCp_dT
+
+        dCv_dresultP = np.zeros((1, num_element + 1))
+        dCv_dresultP[0, -1] = -R_UNIVERSAL_ENG * n_moles * (dlnVqdlnT / dlnVqdlnP) ** 2
+        J['Cv', 'result_P'] = dCv_dresultP
+
+        J['Cv', 'result_T'] = dCp_dresultT
+        J['Cv', 'result_T'][0, -1] -= n_moles * R_UNIVERSAL_ENG / dlnVqdlnP * (2 * dlnVqdlnT)
+        dCv_dresultT_last = J['Cv', 'result_T'][0, -1]
+
+        J['gamma', 'n'] = dCp_dnj * (Cp / Cv - 1) / (dlnVqdlnP * Cv)
+        J['gamma', 'n_moles'] = Cp / dlnVqdlnP / Cv ** 2 * dCv_dnmoles
+        J['gamma', 'T'] = dCp_dT / dlnVqdlnP / Cv * (Cp / Cv - 1)
+
+        dgamma_dresultT = np.zeros((1, num_element + 1))
+        dgamma_dresultT[0, :num_element] = 1 / Cv / dlnVqdlnP * dCp_dresultT[:num_element] * (Cp / Cv - 1)
+        dgamma_dresultT[0, -1] = (-dCp_dresultT[-1] / Cv + Cp / Cv ** 2 * dCv_dresultT_last) / dlnVqdlnP
+        J['gamma', 'result_T'] = dgamma_dresultT
+
+        gamma_dresultP = np.zeros((1, num_element + 1))
+        gamma_dresultP[0, num_element] = Cp / Cv / dlnVqdlnP * (dCv_dresultP[0, -1] / Cv + 1 / dlnVqdlnP)
+        J['gamma', 'result_P'] = gamma_dresultP
+
+    PropsCalcs.compute = _patched_calcs_compute  # type: ignore[assignment]
+    PropsCalcs.compute_partials = _patched_calcs_partials  # type: ignore[assignment]
+
+    LOGGER.debug("Patched PropsRHS and PropsCalcs for numpy 2.x compatibility")
+
+
+# Apply patch on import
+_patch_pycycle_numpy2_compat()
+
 INTERESTING_INPUT_KEYWORDS = ["mach", "alt", "pr", "turbine", "throttle"]
 INTERESTING_OUTPUT_KEYWORDS = ["fn", "fnet", "thrust", "tsfc", "power", "eff"]
 
@@ -80,6 +270,28 @@ def _apply_design_defaults(problem: CycleProblem, model: object, mode: str) -> N
     from ..cycles.simple_turbojet import Turbojet
 
     if isinstance(model, HBTF):
+        # Station Mach number defaults (must match MPhbtf.setup)
+        problem.set_val("inlet.MN", 0.751)
+        problem.set_val("fan.MN", 0.4578)
+        problem.set_val("splitter.BPR", 5.105)
+        problem.set_val("splitter.MN1", 0.3104)
+        problem.set_val("splitter.MN2", 0.4518)
+        problem.set_val("duct4.MN", 0.3121)
+        problem.set_val("lpc.MN", 0.3059)
+        problem.set_val("duct6.MN", 0.3563)
+        problem.set_val("hpc.MN", 0.2442)
+        problem.set_val("bld3.MN", 0.3000)
+        problem.set_val("burner.MN", 0.1025)
+        problem.set_val("hpt.MN", 0.3650)
+        problem.set_val("duct11.MN", 0.3063)
+        problem.set_val("lpt.MN", 0.4127)
+        problem.set_val("duct13.MN", 0.4463)
+        problem.set_val("byp_bld.MN", 0.4489)
+        problem.set_val("duct15.MN", 0.4589)
+        problem.set_val("LP_Nmech", 4666.1, units="rpm")
+        problem.set_val("HP_Nmech", 14705.7, units="rpm")
+
+        # Component performance
         problem.set_val("fan.PR", 1.685)
         problem.set_val("fan.eff", 0.8948)
         problem.set_val("lpc.PR", 1.935)

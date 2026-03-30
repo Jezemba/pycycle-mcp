@@ -48,8 +48,16 @@ def select_interesting_variables(variables: list[tuple[str, dict[str, object]]],
 
 def render_variable_entry(name: str, metadata: dict[str, object], io: str) -> dict[str, object]:
     """Format an OpenMDAO variable metadata entry."""
+    import numpy as np
 
     value = metadata.get("value") if "value" in metadata else metadata.get("val")
+    # Convert numpy arrays to plain Python lists for JSON serialization
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    elif isinstance(value, (np.floating, np.complexfloating)):
+        value = float(value)
+    elif isinstance(value, np.integer):
+        value = int(value)
     return {
         "name": name,
         "io": io,
