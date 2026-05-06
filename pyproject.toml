@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycycle-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "An MCP around pyCycle/OpenMDAO cycle workflows"
 authors = [
   { name = "The Design Research Collective", email = "ask-drc@cmu.edu" }
@@ -67,8 +67,12 @@ warn_unused_ignores = true
 warn_unused_configs = true
 strict = true
 ignore_missing_imports = true
-exclude = ["^build/", "^src/pycycle_mcp/cycles/"]
+exclude = ["^build/", "^src/pycycle_mcp/cycles/", "^src/pycycle_mcp/cpacs_adapter\\.py$"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["pycycle_mcp.cpacs_adapter"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

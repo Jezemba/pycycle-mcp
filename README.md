@@ -73,6 +73,39 @@ The package import root is now:
 Legacy pre-rename import paths and CLI aliases are intentionally
 removed.
 
+## Shared-CPACS Integration
+
+This MCP includes a **CPACS adapter** (`src/pycycle_mcp/cpacs_adapter.py`) that
+bridges pyCycle to the shared-CPACS aircraft analysis pipeline.
+
+### What it does
+
+The adapter reads engine parameters and aerodynamic drag from CPACS, runs a real
+OpenMDAO/pyCycle turbofan cycle analysis, and writes performance results — net
+thrust, TSFC, OPR, BPR, fuel flow — into `//mcpResults`.
+
+| Direction | XPath |
+|-----------|-------|
+| **Reads** | `.//vehicles/engines`, `.//analysisResults/aero/coefficients/CD` |
+| **Writes** | `.//vehicles/engines/engine/analysis/mcpResults` (Fn, TSFC, OPR, BPR, fuel flow) |
+
+### Running as part of the pipeline
+
+```bash
+python pipeline/shared_cpacs_orchestrator.py D150_v30.xml --mcps tigl su2 pycycle mission
+```
+
+See [cmudrc/aircraft-analysis](https://github.com/cmudrc/aircraft-analysis) for
+full pipeline documentation, versioning details, and installation instructions.
+
+### Related MCP servers
+
+| MCP | Repository |
+|-----|-----------|
+| TiGL (geometry) | [cmudrc/tigl-mcp](https://github.com/cmudrc/tigl-mcp) |
+| SU2 (CFD aerodynamics) | [cmudrc/su2-mcp](https://github.com/cmudrc/su2-mcp) |
+| Mission (trajectory/fuel) | [cmudrc/mission-mcp](https://github.com/cmudrc/mission-mcp) |
+
 ## Contributing
 
 Contribution guidelines live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
