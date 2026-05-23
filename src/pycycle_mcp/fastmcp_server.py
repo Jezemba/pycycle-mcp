@@ -19,6 +19,8 @@ from .schemas import (
     CreateCycleModelRequest,
     CreateCycleModelResponse,
     CycleSummaryResponse,
+    GetDesignInputsRequest,
+    GetDesignInputsResponse,
     GetOutputsRequest,
     GetOutputsResponse,
     ListVariablesRequest,
@@ -149,6 +151,28 @@ def _register_tools(server: FastMCP) -> None:
         )
         response = tools.variables.list_variables(request.model_dump(exclude_none=True))
         return _validated_response(response, ListVariablesResponse)
+
+    @_tool(
+        server,
+        name="get_design_inputs",
+        description=(
+            "Return the curated list of canonical design-point input "
+            "variables for the session's cycle type. Each entry "
+            "includes the exact path to pass to set_inputs, units, "
+            "default value, current value, and a short description. "
+            "Use this BEFORE set_inputs to discover the design dials "
+            "for this cycle — the full list_variables output contains "
+            "900+ internal entries (residuals, flow stations, balance "
+            "states) that are NOT safe to set directly."
+        ),
+        tags={"pycycle", "variables"},
+        output_schema=GetDesignInputsResponse.model_json_schema(),
+        annotations=ToolAnnotations(title="Get design inputs", readOnlyHint=True),
+    )
+    def get_design_inputs_tool(session_id: str) -> dict[str, Any]:
+        request = GetDesignInputsRequest(session_id=session_id)
+        response = tools.variables.get_design_inputs(request.model_dump())
+        return _validated_response(response, GetDesignInputsResponse)
 
     @_tool(
         server,

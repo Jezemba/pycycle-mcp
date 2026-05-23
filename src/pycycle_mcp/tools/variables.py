@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..canonical_inputs import get_design_inputs_for_cycle
 from ..errors import error_response, to_error
 from ..session_manager import session_manager
 from ..utils import error_on_missing_session, render_variable_entry
@@ -75,6 +76,59 @@ def set_inputs(payload: dict[str, object]) -> dict[str, object]:
                     return to_error(exc)
 
         return {"updated": updated, "skipped": skipped}
+    except KeyError as exc:
+        return error_on_missing_session(str(session_id), exc)
+    except Exception as exc:  # pragma: no cover
+        return to_error(exc)
+
+
+def get_design_inputs(payload: dict[str, object]) -> dict[str, object]:
+    """Return the curated list of design-point input variables for the
+    session's cycle type.
+
+    Each entry has ``name`` (the exact path to pass to ``set_inputs``),
+    ``units``, ``default``, ``description``, and ``category``. The list
+    is intentionally short — these are the design dials, not the
+    full 900+ promoted variables that ``list_variables`` returns.
+    """
+
+    session_id = payload.get("session_id")
+    if not session_id:
+        return error_response("ValidationError", "session_id is required")
+
+    try:
+        problem, meta = session_manager.get(str(session_id))
+        cycle_type = str(meta.get("cycle_type", ""))
+        inputs = get_design_inputs_for_cycle(cycle_type)
+        # Augment each entry with the current value from the live model
+        # so the agent can see what's already set and only override
+        # what it actually needs to.
+        for entry in inputs:
+            try:
+                current = problem.get_val(entry["name"])
+                entry["current_value"] = (
+                    current.item() if hasattr(current, "item") else current
+                )
+            except Exception:
+                entry["current_value"] = entry.get("default")
+        return {
+            "cycle_type": cycle_type,
+            "design_inputs": inputs,
+            "note": (
+                "These are the canonical design-point inputs for this "
+                "cycle. Pass any subset of these names verbatim to "
+                "set_inputs — they are guaranteed to resolve. The "
+                "full promoted-variable list from list_variables "
+                "contains 900+ internal entries that are NOT safe to "
+                "set directly."
+            )
+            if inputs
+            else (
+                "No curated design-input list available for this cycle "
+                "type. Fall back to list_variables to discover input "
+                "paths."
+            ),
+        }
     except KeyError as exc:
         return error_on_missing_session(str(session_id), exc)
     except Exception as exc:  # pragma: no cover

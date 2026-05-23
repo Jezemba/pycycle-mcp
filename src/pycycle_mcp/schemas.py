@@ -98,6 +98,33 @@ class ListVariablesResponse(BaseResponse):
     variables: list[NamedVariable] = Field(default_factory=list)
 
 
+class GetDesignInputsRequest(BaseModel):
+    """Payload for retrieving the curated design-input list for a session."""
+
+    session_id: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CanonicalInputEntry(BaseModel):
+    """Curated design-point input descriptor."""
+
+    name: str
+    units: str | None = None
+    default: Any | None = None
+    description: str | None = None
+    category: str | None = None
+    current_value: Any | None = None
+
+
+class GetDesignInputsResponse(BaseResponse):
+    """Response from get_design_inputs — the curated design-dial list."""
+
+    cycle_type: str | None = None
+    design_inputs: list[CanonicalInputEntry] = Field(default_factory=list)
+    note: str | None = None
+
+
 class SetInputsRequest(BaseModel):
     """Payload for setting one or more input variables."""
 

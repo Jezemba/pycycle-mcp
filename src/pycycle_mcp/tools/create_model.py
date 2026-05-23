@@ -376,7 +376,12 @@ def create_cycle_model(payload: dict[str, object]) -> dict[str, object]:
             model_name, builder = _resolve_builtin_cycle(str(cycle_type))
 
         problem, resolved_name = _build_problem(builder=builder, mode=str(mode), options=options)
-        session_id = session_manager.create_session(problem=problem, meta={"mode": mode, "options": options})
+        # Stash cycle_type in session meta so get_design_inputs can
+        # dispatch the right canonical-input list (Run #17 finding).
+        session_id = session_manager.create_session(
+            problem=problem,
+            meta={"mode": mode, "options": options, "cycle_type": cycle_type},
+        )
         top_inputs, top_outputs = _summarize_variables(problem)
 
         return {
