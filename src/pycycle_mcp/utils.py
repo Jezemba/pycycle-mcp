@@ -46,18 +46,37 @@ def select_interesting_variables(variables: list[tuple[str, dict[str, object]]],
     return selected
 
 
-def render_variable_entry(name: str, metadata: dict[str, object], io: str) -> dict[str, object]:
-    """Format an OpenMDAO variable metadata entry."""
+def jsonable_variable_value(metadata: dict[str, object]) -> object:
+    """Return an OpenMDAO variable's value as a JSON-serializable Python object.
+
+    Two traps this exists to avoid, both hit in practice:
+
+    1. **Never use ``metadata.get("val") or metadata.get("value")``.** OpenMDAO
+       values are numpy arrays, and ``or`` evaluates ``bool(array)``, which
+       raises ``ValueError: The truth value of an array with more than one
+       element is ambiguous``. That is exactly how ``get_cycle_summary`` came to
+       fail on EVERY call (6/6 in the historical run logs), returning empty
+       ``options``/``key_inputs``/``key_outputs`` — the propulsion discipline's
+       summary tool was totally broken. Use an explicit key check.
+    2. Raw numpy types are not JSON-serializable, so they must be converted.
+    """
     import numpy as np
 
     value = metadata.get("value") if "value" in metadata else metadata.get("val")
-    # Convert numpy arrays to plain Python lists for JSON serialization
     if isinstance(value, np.ndarray):
-        value = value.tolist()
-    elif isinstance(value, (np.floating, np.complexfloating)):
-        value = float(value)
-    elif isinstance(value, np.integer):
-        value = int(value)
+        return value.tolist()
+    if isinstance(value, (np.floating, np.complexfloating)):
+        return float(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    return value
+
+
+def render_variable_entry(name: str, metadata: dict[str, object], io: str) -> dict[str, object]:
+    """Format an OpenMDAO variable metadata entry."""
+    value = jsonable_variable_value(metadata)
     return {
         "name": name,
         "io": io,

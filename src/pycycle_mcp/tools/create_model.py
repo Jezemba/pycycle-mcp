@@ -10,6 +10,7 @@ from ..session_manager import session_manager
 from ..types import CycleProblem
 from ..utils import (
     error_on_missing_session,
+    jsonable_variable_value,
     load_callable,
     select_interesting_variables,
 )
@@ -433,7 +434,12 @@ def get_cycle_summary(payload: dict[str, object]) -> dict[str, object]:
                         "name": name,
                         "units": meta_entry.get("units"),
                         "desc": meta_entry.get("desc"),
-                        "current_value": meta_entry.get("val") or meta_entry.get("value"),
+                        # NOT `meta_entry.get("val") or meta_entry.get("value")` —
+                        # OpenMDAO values are numpy arrays and `or` evaluates
+                        # bool(array), raising "The truth value of an array with
+                        # more than one element is ambiguous". That made THIS tool
+                        # fail on every call (6/6 in the run logs).
+                        "current_value": jsonable_variable_value(meta_entry),
                     }
                 )
             return rendered
