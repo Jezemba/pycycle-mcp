@@ -178,7 +178,12 @@ def test_run_cycle_error_paths_and_driver_branch() -> None:
             "use_driver": True,
         }
     )
-    assert driver_response["success"] is True
+    # One name resolves, one does not -- so this is NOT a success. It used to
+    # report success:True with "missing_output": null sitting in the payload.
+    assert driver_response["success"] is False
+    assert driver_response["model_ran"] is True
+    assert driver_response["outputs"]["Fn"] == 44.0
+    assert driver_response["missing_outputs"] == ["missing_output"]
     assert driver_response["messages"][0] == "Ran driver"
     assert driver_response["outputs"]["missing_output"] is None
 

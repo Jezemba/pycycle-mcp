@@ -62,16 +62,30 @@ def run_cycle(payload: dict[str, object]) -> dict[str, object]:
             return to_error(exc)
 
         outputs: dict[str, object | None] = {}
+        missing: list[str] = []
         for name in outputs_of_interest:
             try:
                 outputs[name] = _to_serializable(problem.get_val(name))
             except Exception as exc:
                 outputs[name] = None
+                missing.append(name)
                 messages.append(f"Missing output {name}: {exc}")
 
+        # `success: True` used to be returned unconditionally, so a call that
+        # resolved NOTHING still reported success. Observed live:
+        #
+        #   {"success": true, "outputs": {"SFC": null, "Fn": null}, ...}
+        #
+        # The names were wrong (they are `perf.TSFC` / `perf.Fn`), and OpenMDAO
+        # said so usefully inside `messages` -- but nothing downstream inspects
+        # prose, and `success: true` is precisely the flag a consumer would
+        # filter on. Null propagates as a real result. `model_ran` keeps the
+        # distinction that the cycle itself did execute.
         return {
-            "success": True,
+            "success": not missing,
+            "model_ran": True,
             "outputs": outputs,
+            "missing_outputs": missing,
             "messages": messages,
         }
     except KeyError as exc:

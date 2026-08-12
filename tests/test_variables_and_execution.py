@@ -35,8 +35,33 @@ def test_set_and_get_inputs() -> None:
 def test_run_cycle_and_get_outputs() -> None:
     session_id = setup_dummy_session()
 
+    # `Fn` must actually resolve for this to be a success case. Previously the
+    # dummy raised KeyError for it and run_cycle returned success:True anyway,
+    # so the assertion below passed while the output was null -- the test
+    # encoded the bug it was meant to guard.
+    variables.set_inputs({"session_id": session_id, "values": {"Fn": 6336.0}})
+
     run_response = execution.run_cycle({"session_id": session_id, "outputs_of_interest": ["Fn"]})
     assert run_response["success"] is True
+    assert run_response["outputs"]["Fn"] == 6336.0
+    assert run_response["missing_outputs"] == []
+
+
+def test_run_cycle_reports_unresolved_outputs_as_failure() -> None:
+    """Observed live: {"success": true, "outputs": {"SFC": null, "Fn": null}}.
+
+    The requested names were wrong (they are `perf.TSFC` / `perf.Fn`) and
+    OpenMDAO said so inside `messages`, but nothing downstream reads prose --
+    `success` is the flag a consumer filters on, so nulls propagated as results.
+    """
+    session_id = setup_dummy_session()
+
+    response = execution.run_cycle(
+        {"session_id": session_id, "outputs_of_interest": ["SFC", "Fn"]}
+    )
+    assert response["success"] is False
+    assert response["model_ran"] is True, "the cycle itself did run; keep that distinct"
+    assert sorted(response["missing_outputs"]) == ["Fn", "SFC"]
 
     # populate output for retrieval
     problem, _ = session_manager.get(session_id)

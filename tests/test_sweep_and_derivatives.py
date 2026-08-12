@@ -12,6 +12,10 @@ from .conftest import DummyProblem
 def test_sweep_inputs_success() -> None:
     problem = DummyProblem()
     problem.model.inputs = [("Mach", {"promoted_name": "Mach"})]
+    # `Fn` must resolve for these sweep points to be successes. It previously
+    # raised KeyError and run_cycle still reported success, so every point in
+    # this sweep "succeeded" while carrying a null Fn.
+    problem.values["Fn"] = 6336.0
     session_id = session_manager.create_session(
         problem=cast(CycleProblem, problem), meta={"mode": "design", "options": {}}
     )
@@ -27,6 +31,7 @@ def test_sweep_inputs_success() -> None:
     results = cast(list[dict[str, object]], result["results"])
     assert len(results) == 2
     assert all(bool(entry["success"]) for entry in results)
+    assert all(entry["outputs"]["Fn"] == 6336.0 for entry in results)
 
 
 def test_compute_totals_formats_by_pair() -> None:
