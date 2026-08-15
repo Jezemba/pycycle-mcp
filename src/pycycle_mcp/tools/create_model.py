@@ -234,11 +234,33 @@ def _resolve_builtin_cycle(cycle_type: str) -> tuple[str, CycleBuilder]:
         "turbofan": lambda: HBTF(thermo_method="CEA"),
         "turbojet": lambda: Turbojet(),
     }
-    builder = mapping.get(cycle_type)
+    # The MODEL NAME this tool reports back is not the same string as the
+    # cycle_type that builds it: create_cycle_model(cycle_type="turbofan")
+    # returns {"model_name": "HBTF", ...}. A caller that reads the name it was
+    # given and passes it back was rejected -- observed live 2026-08-12, twice
+    # in a row, the identical-retry signature. Same shape as SU2 naming
+    # PHYSICAL_PROBLEM and then refusing it: a system whose OUTPUT vocabulary
+    # its INPUT does not accept.
+    #
+    # Accepting the model name closes the round trip; the error below names the
+    # accepted value rather than only listing the vocabulary, which is the
+    # remedy shape that measurably works (a value to substitute, not a different
+    # tool to call).
+    aliases = {"hbtf": "turbofan", "high_bypass_turbofan": "turbofan"}
+    requested = str(cycle_type)
+    canonical = aliases.get(requested.strip().lower(), requested)
+
+    builder = mapping.get(canonical)
     if builder is None:
         supported = ", ".join(sorted(mapping.keys()))
-        raise ValueError(f"Unsupported cycle type: {cycle_type}. Supported: {supported}")
-    return cycle_type, builder
+        near = aliases.get(requested.strip().lower())
+        hint = f" Use {near!r}." if near else ""
+        raise ValueError(
+            f"Unsupported cycle type: {requested}.{hint} Supported: {supported}. "
+            "Note the model NAME in a create_cycle_model response (e.g. 'HBTF') "
+            "is not a cycle_type; the cycle_type that builds it is 'turbofan'."
+        )
+    return canonical, builder
 
 
 def _build_problem(builder: CycleBuilder, mode: str, options: dict[str, object]) -> tuple[CycleProblem, str]:
