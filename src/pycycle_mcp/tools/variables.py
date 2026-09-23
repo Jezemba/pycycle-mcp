@@ -48,7 +48,7 @@ def list_variables(payload: dict[str, object]) -> dict[str, object]:
         return to_error(exc)
 
 
-def _unknown_variable_message(name: str, exc: Exception, session_id: object) -> str | None:
+def _unknown_variable_message(name: str, exc: Exception) -> str | None:
     """Say the name is wrong and where the real ones are -- nothing else (B114).
 
     OpenMDAO answers an unknown name with its own similarity search over every internal variable
@@ -63,8 +63,8 @@ def _unknown_variable_message(name: str, exc: Exception, session_id: object) -> 
     if "not found" not in text and "Variable" not in text:
         return None
     return (f"'{name}' is not a variable in this cycle model. Do not guess another name: call "
-            f"get_design_inputs(session_id='{session_id}') for the exact input names, their units "
-            f"and their current values, and use one of those.")
+            "get_design_inputs on this session for the exact input names, their units and their "
+            "current values, and use one of those.")
 
 
 def set_inputs(payload: dict[str, object]) -> dict[str, object]:
@@ -89,7 +89,7 @@ def set_inputs(payload: dict[str, object]) -> dict[str, object]:
                 problem.set_val(name, value)
                 updated.append(name)
             except Exception as exc:
-                reason = _unknown_variable_message(name, exc, session_id)
+                reason = _unknown_variable_message(name, exc)
                 if allow_missing:
                     skipped.append({"name": name, "reason": reason or str(exc)})
                 elif reason:

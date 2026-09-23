@@ -76,8 +76,8 @@ def run_cycle(payload: dict[str, object]) -> dict[str, object]:
                 # right, rather than passing a bad guess through.
                 messages.append(
                     f"'{name}' is not an output of this cycle model. Do not guess another name: "
-                    f"call list_variables(session_id='{session_id}') for the exact output names "
-                    f"and use one of those."
+                    "call list_variables on this session for the exact output names and use one "
+                    "of those."
                 )
 
         # `success: True` used to be returned unconditionally, so a call that

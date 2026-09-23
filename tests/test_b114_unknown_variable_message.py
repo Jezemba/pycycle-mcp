@@ -16,9 +16,10 @@ class _Problem:
 
 
 def test_the_message_names_the_bad_variable_and_the_listing_tool():
-    msg = _unknown_variable_message("fan.BPR", KeyError("Variable 'fan.BPR' not found."), "s1")
+    msg = _unknown_variable_message("fan.BPR", KeyError("Variable 'fan.BPR' not found."))
     assert "'fan.BPR' is not a variable" in msg
-    assert "get_design_inputs(session_id='s1')" in msg
+    assert "get_design_inputs on this session" in msg
+    assert "s1" not in msg          # no session id: it varies per call and tells the caller nothing
 
 
 def test_openmdao_guesses_are_not_passed_through():
@@ -26,13 +27,13 @@ def test_openmdao_guesses_are_not_passed_through():
         "fan.BPR",
         KeyError("Variable 'fan.BPR' not found. Perhaps you meant one of the following "
                  "variables: ['balance.hpt_PR', 'balance.lpt_PR', 'perf.OPR']."),
-        "s1")
+        )
     for wrong in ("balance.hpt_PR", "balance.lpt_PR", "perf.OPR", "Perhaps you meant"):
         assert wrong not in msg
 
 
 def test_an_unrelated_failure_keeps_its_own_message():
-    assert _unknown_variable_message("fan.PR", ValueError("shape mismatch (3,) vs (1,)"), "s1") is None
+    assert _unknown_variable_message("fan.PR", ValueError("shape mismatch (3,) vs (1,)")) is None
 
 
 def test_set_inputs_returns_the_clean_error(monkeypatch):
