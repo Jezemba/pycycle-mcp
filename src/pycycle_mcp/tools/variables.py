@@ -48,6 +48,25 @@ def list_variables(payload: dict[str, object]) -> dict[str, object]:
         return to_error(exc)
 
 
+def _unknown_variable_message(name: str, exc: Exception, session_id: object) -> str | None:
+    """Say the name is wrong and where the real ones are -- nothing else (B114).
+
+    OpenMDAO answers an unknown name with its own similarity search over every internal variable
+    in the model. Measured in geoauth_all8_7960 networked_iterative_feedback L1: the agent asked for
+    `fan.BPR` and was told "Perhaps you meant one of the following variables: ['balance.hpt_PR',
+    'balance.lpt_PR', 'perf.OPR']" -- three names that are all wrong; the one it wanted is
+    `splitter.BPR`, which `get_design_inputs` had already shown it. Guessing badly is worse than not
+    guessing, so the suggestions are dropped and the caller is sent to the list that is correct by
+    construction.
+    """
+    text = str(exc)
+    if "not found" not in text and "Variable" not in text:
+        return None
+    return (f"'{name}' is not a variable in this cycle model. Do not guess another name: call "
+            f"get_design_inputs(session_id='{session_id}') for the exact input names, their units "
+            f"and their current values, and use one of those.")
+
+
 def set_inputs(payload: dict[str, object]) -> dict[str, object]:
     """Set one or more input variables in the cycle model."""
 
@@ -70,8 +89,11 @@ def set_inputs(payload: dict[str, object]) -> dict[str, object]:
                 problem.set_val(name, value)
                 updated.append(name)
             except Exception as exc:
+                reason = _unknown_variable_message(name, exc, session_id)
                 if allow_missing:
-                    skipped.append({"name": name, "reason": str(exc)})
+                    skipped.append({"name": name, "reason": reason or str(exc)})
+                elif reason:
+                    return error_response("UnknownVariable", reason)
                 else:
                     return to_error(exc)
 

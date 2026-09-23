@@ -69,7 +69,16 @@ def run_cycle(payload: dict[str, object]) -> dict[str, object]:
             except Exception as exc:
                 outputs[name] = None
                 missing.append(name)
-                messages.append(f"Missing output {name}: {exc}")
+                # B114: OpenMDAO answers an unknown name with a similarity search over every
+                # internal variable, and its guesses are wrong -- 'SFC' was answered with
+                # ['Fn_DES', 'perf...'] in geoauth_all8_7960 while the name wanted was
+                # 'perf.TSFC'. Say the name is wrong and send the caller to the list that is
+                # right, rather than passing a bad guess through.
+                messages.append(
+                    f"'{name}' is not an output of this cycle model. Do not guess another name: "
+                    f"call list_variables(session_id='{session_id}') for the exact output names "
+                    f"and use one of those."
+                )
 
         # `success: True` used to be returned unconditionally, so a call that
         # resolved NOTHING still reported success. Observed live:
