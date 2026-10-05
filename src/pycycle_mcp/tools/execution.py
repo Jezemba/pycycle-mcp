@@ -36,6 +36,49 @@ def _to_serializable(val: object) -> object:
     return val
 
 
+# A design-point cycle is solved when the balance hit its thrust target and the low-pressure
+# turbine ratio is physical. run_model uses Newton with err_on_non_converge=False, so a failed solve
+# still returns, with numbers (measured: perf.Fn = 1.46e24 lbf reported as success). The audit's
+# validity rule: |perf.Fn - target| small and balance.lpt_PR < 8.
+FN_REL_TOLERANCE = 1e-3
+LPT_PR_MAX = 8.0
+_THRUST_TARGETS = ("Fn_DES", "balance.Fn_target")
+
+
+def _scalar(problem: object, name: str) -> float | None:
+    try:
+        value = _to_serializable(problem.get_val(name))  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - absent on this archetype
+        return None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def convergence_check(problem: object) -> dict[str, object]:
+    """Whether the design point is actually solved, with the numbers that say so."""
+    fn = _scalar(problem, "perf.Fn")
+    target_name, target = next(((n, v) for n in _THRUST_TARGETS
+                                if (v := _scalar(problem, n)) is not None), (None, None))
+    lpt_pr = _scalar(problem, "balance.lpt_PR")
+    check: dict[str, object] = {"perf.Fn": fn, "thrust_target": target, "thrust_target_name": target_name,
+                                "balance.lpt_PR": lpt_pr}
+    reasons: list[str] = []
+    values = [v for v in (fn, target, lpt_pr) if v is not None]
+    if any(not np.isfinite(v) for v in values):
+        reasons.append("a solved value is not finite")
+    if fn is None or target is None:
+        reasons.append("thrust or its target could not be read")
+    else:
+        rel = abs(fn - target) / max(abs(target), 1e-9)
+        check["thrust_rel_error"] = rel
+        if not np.isfinite(rel) or rel > FN_REL_TOLERANCE:
+            reasons.append(f"perf.Fn misses its target by {rel:.3g} (> {FN_REL_TOLERANCE})")
+    if lpt_pr is not None and np.isfinite(lpt_pr) and lpt_pr >= LPT_PR_MAX:
+        reasons.append(f"balance.lpt_PR {lpt_pr:.3g} >= {LPT_PR_MAX} (not physical)")
+    check["converged"] = not reasons
+    check["reasons"] = reasons
+    return check
+
+
 def run_cycle(payload: dict[str, object]) -> dict[str, object]:
     """Run the cycle model and return selected outputs."""
 
@@ -90,9 +133,16 @@ def run_cycle(payload: dict[str, object]) -> dict[str, object]:
         # prose, and `success: true` is precisely the flag a consumer would
         # filter on. Null propagates as a real result. `model_ran` keeps the
         # distinction that the cycle itself did execute.
+        # `success` says the names resolved; `converged` says the cycle is solved.
+        check = convergence_check(problem)
+        if not check["converged"]:
+            messages.append("The cycle did NOT converge: " + "; ".join(check["reasons"]) +
+                            ". Do not use these outputs as a design result.")
         return {
             "success": not missing,
             "model_ran": True,
+            "converged": check["converged"],
+            "convergence_check": check,
             "outputs": outputs,
             "missing_outputs": missing,
             "messages": messages,
