@@ -1,6 +1,7 @@
 """Tool collection for the pyCycle MCP server."""
 
 from .create_model import close_cycle_model, create_cycle_model, get_cycle_summary
+from .deck import generate_engine_deck
 from .derivatives import compute_totals
 from .execution import run_cycle
 from .ping import PingRequest, PingResponse, ping
@@ -18,6 +19,7 @@ __all__ = [
     "run_cycle",
     "sweep_inputs",
     "compute_totals",
+    "generate_engine_deck",
     "ping",
     "PingRequest",
     "PingResponse",

@@ -234,3 +234,31 @@ class ComputeTotalsResponse(BaseResponse):
 
     jacobian: dict[str, Any] = Field(default_factory=dict)
     messages: list[str] = Field(default_factory=list)
+
+
+class GenerateEngineDeckRequest(BaseModel):
+    """Payload for generating an engine deck from a session (Avion B3)."""
+
+    session_id: str
+    workers: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GenerateEngineDeckResponse(BaseResponse):
+    """An Aviary-format engine deck of the session's cycle."""
+
+    success: bool | None = None
+    cached: bool | None = None
+    deck_file: str | None = None
+    design_key: str | None = None
+    reference_fn_des_lbf: float | None = None
+    size_normalised: bool | None = None
+    design_tsfc: float | None = None
+    design_bpr: float | None = None
+    sls_net_thrust_lbf: float | None = None
+    n_points: int | None = None
+    n_failed: int | None = None
+    envelope_holes: list[dict[str, float]] = Field(default_factory=list)
+    wall_seconds: float | None = None
+    messages: list[str] = Field(default_factory=list)

@@ -65,6 +65,7 @@ ALT_STEP_FT = 8000.0
 MAX_HALVINGS = 4
 MAX_THROTTLE_HALVINGS = 1
 MACH_CHUNK = 2
+DEFAULT_DECK_WORKERS = 12
 
 # Thrust a size-invariant cycle's deck is generated at (pyCycle's canonical Fn_DES); see deck_inputs.
 REFERENCE_FN_DES_LBF = 5900.0
@@ -540,12 +541,24 @@ def _run_chunk(args: tuple) -> dict[str, object]:
     return result()
 
 
+def _lowest_priority() -> None:
+    """Deck workers yield the CPU to everything else on a shared machine (nice 19)."""
+    try:
+        os.nice(19 - os.nice(0))
+    except OSError:  # pragma: no cover - not permitted here; run at the inherited priority
+        pass
+
+
 def default_workers(n_jobs: int) -> int:
-    """Worker processes: ``PYCYCLE_DECK_WORKERS`` if set, else half the cores (the GPUs' LLM needs some)."""
+    """Worker processes: ``PYCYCLE_DECK_WORKERS`` if set, else ``DEFAULT_DECK_WORKERS``.
+
+    ws8 is shared: 65 deck workers at once loaded it to ~90 and Jessica asked to keep it down (2026-10-31).
+    12 workers make a full deck in 32-51 min (measured, nice 19, other jobs running).
+    """
     env = os.environ.get("PYCYCLE_DECK_WORKERS")
     if env:
         return max(1, min(n_jobs, int(env)))
-    return max(1, min(n_jobs, (os.cpu_count() or 2) // 2))
+    return max(1, min(n_jobs, DEFAULT_DECK_WORKERS))
 
 
 def generate_deck(design_inputs: dict[str, dict[str, object]],
@@ -572,7 +585,8 @@ def generate_deck(design_inputs: dict[str, dict[str, object]],
     if n <= 1:
         results = [_run_chunk(j) for j in jobs]
     else:
-        with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn")) as pool:
+        with ProcessPoolExecutor(max_workers=n, mp_context=get_context("spawn"),
+                                 initializer=_lowest_priority) as pool:
             results = list(pool.map(_run_chunk, jobs))
 
     points = [DeckPoint(**p) for r in results for p in r["points"]]  # type: ignore[arg-type]
@@ -609,6 +623,7 @@ def write_deck(result: DeckResult, path: str, key: str) -> dict[str, object]:
         "grid": result.grid,
         "n_points": len(kept),
         "dropped_cells": dropped,
+        "cells": [{"mach": m, "alt_ft": a} for m, a in sorted({(p.mach, p.alt_ft) for p in kept})],
         "n_failed": len(result.failed),
         "failed": result.failed,
         "sls_net_thrust_lbf": sls_net_thrust(rows),

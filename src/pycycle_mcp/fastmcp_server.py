@@ -16,6 +16,8 @@ from .schemas import (
     CloseCycleModelResponse,
     ComputeTotalsRequest,
     ComputeTotalsResponse,
+    GenerateEngineDeckRequest,
+    GenerateEngineDeckResponse,
     CreateCycleModelRequest,
     CreateCycleModelResponse,
     CycleSummaryResponse,
@@ -276,6 +278,24 @@ def _register_tools(server: FastMCP) -> None:
         )
         response = tools.derivatives.compute_totals(request.model_dump())
         return _validated_response(response, ComputeTotalsResponse)
+
+    @_tool(
+        server,
+        name="generate_engine_deck",
+        description=(
+            "Engine deck of the session's cycle for the mission: net thrust and fuel flow over Mach x "
+            "altitude x throttle (off-design pyCycle), written as an Aviary engine deck file. The deck "
+            "depends on the cycle only (BPR, pressure ratios, T4, efficiencies, design condition) and is "
+            "cached, so an unchanged cycle returns at once; a new cycle takes tens of minutes."
+        ),
+        tags={"pycycle", "execution", "deck"},
+        output_schema=GenerateEngineDeckResponse.model_json_schema(),
+        annotations=ToolAnnotations(title="Generate engine deck"),
+    )
+    def generate_engine_deck_tool(session_id: str, workers: int | None = None) -> dict[str, Any]:
+        request = GenerateEngineDeckRequest(session_id=session_id, workers=workers)
+        response = tools.deck.generate_engine_deck(request.model_dump())
+        return _validated_response(response, GenerateEngineDeckResponse)
 
 
 def build_server() -> FastMCP:
