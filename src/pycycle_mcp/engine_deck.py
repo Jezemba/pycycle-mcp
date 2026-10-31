@@ -46,6 +46,10 @@ STATIC_MACH = 0.001
 # engine exceeds at sea level. The deck model bounds it relative to the design flow instead.
 OD_W_UPPER_PER_DESIGN_W = 10.0
 
+# Converged off-design solves took <= 8 Newton iterations (measured); a solve still unconverged at
+# this cap is failing, and the HBTF default of 50 only made failures cost ~70 s each.
+OD_NEWTON_MAXITER = 20
+
 # An off-design point is solved when every residual is small and the part-power thrust matches its
 # target. Newton runs with err_on_non_converge=False, so a failed solve still returns numbers.
 RESIDUAL_TOL = 1e-6
@@ -55,7 +59,8 @@ THRUST_REL_TOL = 1e-4
 MACH_STEP = 0.1
 ALT_STEP_FT = 8000.0
 MAX_HALVINGS = 4
-MACH_CHUNK = 3
+MAX_THROTTLE_HALVINGS = 1
+MACH_CHUNK = 2
 
 # Thrust a size-invariant cycle's deck is generated at (pyCycle's canonical Fn_DES); see deck_inputs.
 REFERENCE_FN_DES_LBF = 5900.0
@@ -79,6 +84,7 @@ class DeckPoint:
     fuel_flow_lbh: float
     net_thrust_lbf: float
     t4_degR: float
+    bpr: float = float("nan")
 
 
 @dataclass
@@ -245,6 +251,8 @@ def _build_problem(design_inputs: dict[str, dict[str, object]], w_upper: float):
     prob = om.Problem(reports=False)
     prob.model = DeckCycle()
     prob.setup(check=False)
+    for pt in ("OD_full_pwr", "OD_part_pwr"):
+        getattr(prob.model, pt).nonlinear_solver.options["maxiter"] = OD_NEWTON_MAXITER
     return prob
 
 
@@ -467,7 +475,8 @@ def _run_chunk(args: tuple) -> dict[str, object]:
         previous = 1.0
         for throttle in throttles:
             if throttle != 1.0:
-                ok, why = _continue(prob, run, set_throttle, part_check, (previous,), (throttle,), 1)
+                ok, why = _continue(prob, run, set_throttle, part_check, (previous,), (throttle,), 1,
+                                    max_halvings=MAX_THROTTLE_HALVINGS)
                 if not ok:
                     failed.append({"mach": mach, "alt_ft": alt_ft, "throttle": throttle, "reason": why})
                     break  # lower throttles would continue from an unsolved state
@@ -479,6 +488,7 @@ def _run_chunk(args: tuple) -> dict[str, object]:
                 "fuel_flow_lbh": _val(prob, "OD_part_pwr.perf.Wfuel", "lbm/h"),
                 "net_thrust_lbf": _val(prob, "OD_part_pwr.perf.Fn", "lbf"),
                 "t4_degR": _val(prob, "OD_part_pwr.burner.Fl_O:tot:T", "degR"),
+                "bpr": _val(prob, "OD_part_pwr.balance.BPR"),
             })
         _restore(prob, full_power)
         at_full_power(here)
