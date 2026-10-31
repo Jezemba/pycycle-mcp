@@ -31,6 +31,13 @@ def test_deck_columns_are_aviary_aliases():
     assert names == ["mach_number", "altitude", "throttle", "gross_thrust", "ram_drag", "fuel_flow"]
 
 
+def test_cells_with_one_throttle_are_dropped():
+    pts = [_point(0.0, 37000.0, 1.0), _point(0.8, 35000.0, 1.0), _point(0.8, 35000.0, 0.5)]
+    kept, dropped = ed.usable_points(pts)
+    assert {(p.mach, p.alt_ft) for p in kept} == {(0.8, 35000.0)}
+    assert dropped == [{"mach": 0.0, "alt_ft": 37000.0, "points": 1}]
+
+
 def test_sls_none_without_static_row():
     assert ed.sls_net_thrust([{"mach_number": 0.2, "altitude": 0.0, "gross_thrust": 1.0, "ram_drag": 0.0}]) is None
 

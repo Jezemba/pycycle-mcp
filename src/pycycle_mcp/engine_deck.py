@@ -121,6 +121,30 @@ def format_deck(points: Iterable[DeckPoint], header_lines: Sequence[str] = ()) -
     return "\n".join(out) + "\n"
 
 
+MIN_THROTTLES_PER_CELL = 2
+
+
+def usable_points(points: Iterable[DeckPoint]) -> tuple[list[DeckPoint], list[dict[str, float]]]:
+    """Points Aviary can use, and the (Mach, altitude) cells dropped.
+
+    Aviary's flight-idle generation extrapolates from the two lowest throttle points of every
+    (Mach, altitude) cell; a cell with one point makes its column arrays different lengths and the
+    EngineDeck fails to build (measured 2026-10-31: a T4 deck whose M0 / 37,000 ft cell solved only
+    full power -> "inhomogeneous shape" in EngineDeck._sort_data). Such cells are left out.
+    """
+    cells: dict[tuple[float, float], list[DeckPoint]] = {}
+    for p in points:
+        cells.setdefault((p.mach, p.alt_ft), []).append(p)
+    kept: list[DeckPoint] = []
+    dropped: list[dict[str, float]] = []
+    for (mach, alt), pts in sorted(cells.items()):
+        if len({p.throttle for p in pts}) >= MIN_THROTTLES_PER_CELL:
+            kept.extend(pts)
+        else:
+            dropped.append({"mach": mach, "alt_ft": alt, "points": len(pts)})
+    return kept, dropped
+
+
 def read_deck(text: str) -> list[dict[str, float]]:
     """Parse deck text written by :func:`format_deck` (comments and blank lines skipped)."""
     rows: list[dict[str, float]] = []
@@ -431,10 +455,21 @@ def _run_chunk(args: tuple) -> dict[str, object]:
     t_setup = time.time() - t_setup
     run_times: list[float] = []
 
+    raised: list[str] = []
+
     def run() -> None:
+        # pyCycle can raise inside a solve that wanders off (log of zero, NaN, singular Jacobian);
+        # measured 2026-10-31: one such point killed four whole deck runs. It is a failed point.
         t = time.time()
-        prob.run_model()
+        raised.clear()
+        try:
+            prob.run_model()
+        except Exception as exc:  # noqa: BLE001
+            raised.append(f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}")
         run_times.append(time.time() - t)
+
+    def checked(throttle: float) -> tuple[bool, str]:
+        return (False, f"solver raised {raised[0]}") if raised else _solved(prob, throttle)
 
     def at_full_power(cond: tuple[float, ...]) -> None:
         prob.set_val("OD_part_pwr.PC", 1.0)
@@ -443,8 +478,8 @@ def _run_chunk(args: tuple) -> dict[str, object]:
     def set_throttle(pc: tuple[float, ...]) -> None:
         prob.set_val("OD_part_pwr.PC", pc[0])
 
-    full_check = lambda _cond: _solved(prob, 1.0)  # noqa: E731
-    part_check = lambda pc: _solved(prob, pc[0])  # noqa: E731
+    full_check = lambda _cond: checked(1.0)  # noqa: E731
+    part_check = lambda pc: checked(pc[0])  # noqa: E731
     points: list[dict[str, float]] = []
     failed: list[dict[str, object]] = []
 
@@ -543,6 +578,7 @@ def generate_deck(design_inputs: dict[str, dict[str, object]],
 
 def write_deck(result: DeckResult, path: str, key: str) -> dict[str, object]:
     """Write the deck file and a JSON sidecar describing how it was made."""
+    kept, dropped = usable_points(result.points)
     d = result.design
     header = [
         "pyCycle-generated engine deck (pycycle-mcp generate_engine_deck, Avion B3)",
@@ -553,14 +589,15 @@ def write_deck(result: DeckResult, path: str, key: str) -> dict[str, object]:
     ]
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(format_deck(result.points, header))
+        fh.write(format_deck(kept, header))
     rows = read_deck(open(path, encoding="utf-8").read())
     sidecar = {
         "deck_path": os.path.abspath(path),
         "design_key": key,
         "design": result.design,
         "grid": result.grid,
-        "n_points": len(result.points),
+        "n_points": len(kept),
+        "dropped_cells": dropped,
         "n_failed": len(result.failed),
         "failed": result.failed,
         "sls_net_thrust_lbf": sls_net_thrust(rows),
