@@ -15,6 +15,7 @@ class HBTF(pyc.Cycle):
         # Off-design inlet-flow upper bound. 1000 lbm/s suits the example's ~5,900 lbf engine; the
         # engine-deck builder (engine_deck.py, Avion B3) raises it for larger engines at sea level.
         self.options.declare('od_W_upper', default=1000., desc='off-design balance.W upper bound, lbm/s')
+        self.options.declare('od_BPR_upper', default=10., desc='off-design balance.BPR upper bound')
 
         super().initialize()
 
@@ -166,7 +167,7 @@ class HBTF(pyc.Cycle):
             self.connect('balance.W', 'fc.W')
             self.connect('core_nozz.Throat:stat:area', 'balance.lhs:W')
 
-            balance.add_balance('BPR', lower=2., upper=10., eq_units='inch**2')
+            balance.add_balance('BPR', lower=2., upper=self.options['od_BPR_upper'], eq_units='inch**2')
             self.connect('balance.BPR', 'splitter.BPR')
             self.connect('byp_nozz.Throat:stat:area', 'balance.lhs:BPR')
 

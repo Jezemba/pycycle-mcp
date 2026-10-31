@@ -45,6 +45,10 @@ STATIC_MACH = 0.001
 # The off-design inlet-flow balance in HBTF is bounded to [10, 1000] lbm/s by default, which a large
 # engine exceeds at sea level. The deck model bounds it relative to the design flow instead.
 OD_W_UPPER_PER_DESIGN_W = 10.0
+# Off-design bypass ratio rises at part power: a BPR-8 design reached 15.6 at 30% thrust (measured), and
+# HBTF's fixed bound of 10 failed 6 of 10 points on that engine vs 0 of 48 with 20. The bound follows the design.
+OD_BPR_UPPER_PER_DESIGN_BPR = 3.0
+OD_BPR_UPPER_MIN = 10.0
 
 # Converged off-design solves took <= 8 Newton iterations (measured); a solve still unconverged at
 # this cap is failing, and the HBTF default of 50 only made failures cost ~70 s each.
@@ -245,7 +249,7 @@ def session_design_inputs(problem: object) -> dict[str, dict[str, object]]:
 # The multipoint model (pyCycle imported lazily: workers and tests import this module cheaply)
 # ---------------------------------------------------------------------------
 
-def _build_problem(design_inputs: dict[str, dict[str, object]], w_upper: float):
+def _build_problem(design_inputs: dict[str, dict[str, object]], w_upper: float, bpr_upper: float = OD_BPR_UPPER_MIN):
     import openmdao.api as om
     import pycycle.api as pyc
 
@@ -255,9 +259,9 @@ def _build_problem(design_inputs: dict[str, dict[str, object]], w_upper: float):
         def setup(self):
             self.pyc_add_pnt("DESIGN", HBTF(thermo_method="CEA"))
             self.pyc_add_pnt("OD_full_pwr", HBTF(design=False, thermo_method="CEA", throttle_mode="T4",
-                                                 od_W_upper=w_upper))
+                                                 od_W_upper=w_upper, od_BPR_upper=bpr_upper))
             self.pyc_add_pnt("OD_part_pwr", HBTF(design=False, thermo_method="CEA",
-                                                 throttle_mode="percent_thrust", od_W_upper=w_upper))
+                                                 throttle_mode="percent_thrust", od_W_upper=w_upper, od_BPR_upper=bpr_upper))
             self.connect("OD_full_pwr.perf.Fn", "OD_part_pwr.Fn_max")
             for pt in ("OD_full_pwr", "OD_part_pwr"):
                 self.set_input_defaults(f"{pt}.fc.MN", 0.8)
@@ -446,9 +450,9 @@ def _steps(d_mach: float, d_alt: float) -> int:
 
 def _run_chunk(args: tuple) -> dict[str, object]:
     """Worker: one altitude and a contiguous run of Mach numbers (own process, own model)."""
-    design_inputs, design, alt_ft, machs, throttles, w_upper = args
+    design_inputs, design, alt_ft, machs, throttles, w_upper, bpr_upper = args
     t_setup = time.time()
-    prob = _build_problem(design_inputs, w_upper)
+    prob = _build_problem(design_inputs, w_upper, bpr_upper)
     _apply_inputs(prob, design_inputs)
     _seed(prob, design)
     prob.set_solver_print(level=-1)
@@ -554,8 +558,9 @@ def generate_deck(design_inputs: dict[str, dict[str, object]],
     # the design solution seeds every worker and sets the off-design flow bound
     design = solve_design_point(design_inputs)
     w_upper = max(1000.0, OD_W_UPPER_PER_DESIGN_W * design["W_lbms"])
+    bpr_upper = max(OD_BPR_UPPER_MIN, OD_BPR_UPPER_PER_DESIGN_BPR * design["BPR"])
 
-    jobs = [(design_inputs, design, alt, ms, throttles, w_upper)
+    jobs = [(design_inputs, design, alt, ms, throttles, w_upper, bpr_upper)
             for alt, ms in chunk_jobs(grid["mach"], grid["altitude_ft"], design["MN"], chunk)]
     n = workers or default_workers(len(jobs))
     if n <= 1:
@@ -569,7 +574,7 @@ def generate_deck(design_inputs: dict[str, dict[str, object]],
     timings = [r["timing"] for r in results]
     return DeckResult(points=points, failed=failed, design=design, design_inputs=design_inputs,
                       grid=grid, wall_seconds=time.time() - start,
-                      meta={"w_upper_lbms": w_upper, "workers": n, "jobs": len(jobs),
+                      meta={"w_upper_lbms": w_upper, "bpr_upper": bpr_upper, "workers": n, "jobs": len(jobs),
                             "cpu_seconds": round(sum(t["run_s_total"] + t["setup_s"] for t in timings), 1),
                             "max_job_seconds": round(max(t["run_s_total"] + t["setup_s"] for t in timings), 1),
                             "solves": sum(t["runs"] for t in timings)})
