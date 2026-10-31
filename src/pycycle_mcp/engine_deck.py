@@ -106,10 +106,16 @@ class DeckResult:
 # Pure helpers (no pyCycle): deck text, reading it back, grid ordering, keys
 # ---------------------------------------------------------------------------
 
+# Bump when a change to the builder changes the deck for the same inputs (solver bounds, continuation,
+# point acceptance). Part of the key, so a new builder never overwrites or reuses an old deck
+# (2026-10-31: the BPR-bound fix regenerated a deck under the same key and overwrote the old one).
+DECK_BUILDER_VERSION = 2
+
+
 def design_key(design_inputs: dict[str, dict[str, object]], grid: dict[str, Sequence[float]]) -> str:
-    """Stable hash of everything the deck depends on -- same inputs give the same key."""
-    payload = json.dumps({"inputs": design_inputs, "grid": {k: list(v) for k, v in grid.items()}},
-                         sort_keys=True, default=float)
+    """Stable hash of everything the deck depends on -- same inputs and builder give the same key."""
+    payload = json.dumps({"inputs": design_inputs, "grid": {k: list(v) for k, v in grid.items()},
+                          "builder": DECK_BUILDER_VERSION}, sort_keys=True, default=float)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 

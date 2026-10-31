@@ -69,6 +69,14 @@ def test_size_invariant_and_deck_inputs_normalise_thrust():
     assert ed.design_key(ed.deck_inputs(changed)[0], grid) != ed.design_key(gen, grid)
 
 
+def test_builder_version_is_part_of_the_key(monkeypatch):
+    inputs = {"Fn_DES": {"value": 5900.0, "units": "lbf"}}
+    grid = {"mach": [0.8], "altitude_ft": [35000.0], "throttle": [1.0]}
+    before = ed.design_key(inputs, grid)
+    monkeypatch.setattr(ed, "DECK_BUILDER_VERSION", ed.DECK_BUILDER_VERSION + 1)
+    assert ed.design_key(inputs, grid) != before
+
+
 def test_shaft_power_extraction_breaks_size_invariance():
     inputs = {"Fn_DES": {"value": 5000.0, "units": "lbf"}, "hp_shaft.HPX": {"value": 250.0, "units": "hp"}}
     assert not ed.size_invariant(inputs)
