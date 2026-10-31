@@ -12,6 +12,9 @@ class HBTF(pyc.Cycle):
     def initialize(self):
         # Initialize the model here by setting option variables such as a switch for design vs off-des cases
         self.options.declare('throttle_mode', default='T4', values=['T4', 'percent_thrust'])
+        # Off-design inlet-flow upper bound. 1000 lbm/s suits the example's ~5,900 lbf engine; the
+        # engine-deck builder (engine_deck.py, Avion B3) raises it for larger engines at sea level.
+        self.options.declare('od_W_upper', default=1000., desc='off-design balance.W upper bound, lbm/s')
 
         super().initialize()
 
@@ -159,7 +162,7 @@ class HBTF(pyc.Cycle):
                 self.promotes('balance', inputs=[('mult:FAR', 'PC'), ('lhs:FAR', 'Fn_max')])
 
 
-            balance.add_balance('W', units='lbm/s', lower=10., upper=1000., eq_units='inch**2')
+            balance.add_balance('W', units='lbm/s', lower=10., upper=self.options['od_W_upper'], eq_units='inch**2')
             self.connect('balance.W', 'fc.W')
             self.connect('core_nozz.Throat:stat:area', 'balance.lhs:W')
 
