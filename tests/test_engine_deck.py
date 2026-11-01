@@ -128,3 +128,28 @@ def test_hbtf_session_has_settable_rating_inputs():
     assert set(out["updated"]) == {"T4_TAKEOFF", "T4_CLIMB"} and not out["skipped"]
     inputs = ed.session_design_inputs(session_manager.get(sid)[0])
     assert inputs["T4_TAKEOFF"]["value"] == 3200.0 and inputs["T4_CLIMB"]["units"] == "degR"
+
+
+def test_canonical_removes_round_off():
+    assert ed.canonical(-1.9029869596781812e-22) == 0.0
+    assert ed.canonical(0.9999999999999996) == 1.0
+    assert ed.canonical(0.30630000000000007) == 0.3063
+    assert ed.canonical(9.369) == 9.369 and ed.canonical(2857.0) == 2857.0
+
+
+def test_same_cycle_two_sizes_after_run_cycle_share_one_deck_key():
+    """2026-11-01 sweep: run_cycle drifted 28 unset inputs by round-off, so a wing change (new Fn_DES) gave a new
+    deck key and rebuilt a 45-minute deck."""
+    from pycycle_mcp.tools.create_model import create_cycle_model
+    from pycycle_mcp.tools.execution import run_cycle
+    from pycycle_mcp.tools.variables import set_inputs
+    from pycycle_mcp.session_manager import session_manager
+
+    grid = {"mach": [0.8], "altitude_ft": [35000.0], "throttle": [1.0]}
+    keys = []
+    for fn in (9846.98, 10300.0):
+        sid = create_cycle_model({"cycle_type": "turbofan", "mode": "design"})["session_id"]
+        set_inputs({"session_id": sid, "values": {"Fn_DES": fn, "fc.alt": 33000.0, "fc.MN": 0.78}})
+        run_cycle({"session_id": sid})
+        keys.append(ed.design_key(ed.deck_inputs(ed.session_design_inputs(session_manager.get(sid)[0]))[0], grid))
+    assert keys[0] == keys[1]

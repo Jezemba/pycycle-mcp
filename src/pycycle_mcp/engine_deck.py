@@ -112,7 +112,7 @@ class DeckResult:
 # Bump when a change to the builder changes the deck for the same inputs (solver bounds, continuation,
 # point acceptance). Part of the key, so a new builder never overwrites or reuses an old deck
 # (2026-10-31: the BPR-bound fix regenerated a deck under the same key and overwrote the old one).
-DECK_BUILDER_VERSION = 3   # 3: take-off / climb ratings (2026-11-01)
+DECK_BUILDER_VERSION = 4   # 3: take-off / climb ratings; 4: canonical input values (2026-11-01)
 
 
 def design_key(design_inputs: dict[str, dict[str, object]], grid: dict[str, Sequence[float]]) -> str:
@@ -258,6 +258,22 @@ def deck_inputs(design_inputs: dict[str, dict[str, object]]) -> tuple[dict[str, 
 # Session -> design inputs
 # ---------------------------------------------------------------------------
 
+# A session's unset inputs drift by round-off while run_cycle solves: measured 2026-11-01, 28 of them (bleed fractions
+# 0 -> ~1e-22, nozzle Cv 1.0 -> 0.9999999999999996, duct11.MN 0.3063 -> 0.30630000000000007), so two sessions of
+# the same cycle gave different deck keys and every geometry change rebuilt a 45-minute deck. Values are taken to
+# 10 significant figures and |x| < 1e-12 counts as 0, for the key AND the deck, so the deck depends on the cycle only.
+CANONICAL_SIG_FIGS = 10
+CANONICAL_ZERO = 1e-12
+
+
+def canonical(x: float) -> float:
+    """A design input as the deck uses it: round-off removed (see CANONICAL_SIG_FIGS)."""
+    x = float(x)
+    if abs(x) < CANONICAL_ZERO:
+        return 0.0
+    return float(f"{x:.{CANONICAL_SIG_FIGS}g}")
+
+
 def session_design_inputs(problem: object) -> dict[str, dict[str, object]]:
     """Every independent input of a design-point session, with its value and units.
 
@@ -277,7 +293,7 @@ def session_design_inputs(problem: object) -> dict[str, dict[str, object]]:
         units = meta.get("units")
         value = problem.get_val(prom, units=units) if units else problem.get_val(prom)  # type: ignore[attr-defined]
         arr = np.asarray(value, dtype=float).ravel()
-        seen[prom] = {"value": float(arr[0]) if arr.size == 1 else [float(v) for v in arr],
+        seen[prom] = {"value": canonical(arr[0]) if arr.size == 1 else [canonical(v) for v in arr],
                       "units": units}
     return dict(sorted(seen.items()))
 
