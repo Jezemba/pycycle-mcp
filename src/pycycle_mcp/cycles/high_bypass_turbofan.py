@@ -7,6 +7,11 @@ import openmdao.api as om
 import pycycle.api as pyc
 
 
+# Take-off and climb rating temperatures (degR). PROVISIONAL = the design T4 (constant-T4 engine) until
+# Jessica picks the defaults from the calibration against the bench engine (Avion B3, 2026-11-01).
+RATING_DEFAULTS_DEGR = {"T4_TAKEOFF": 2857.0, "T4_CLIMB": 2857.0}
+
+
 class HBTF(pyc.Cycle):
 
     def initialize(self):
@@ -72,6 +77,17 @@ class HBTF(pyc.Cycle):
         self.add_subsystem('lp_shaft', pyc.Shaft(num_ports=3),promotes_inputs=[('Nmech','LP_Nmech')])
         self.add_subsystem('hp_shaft', pyc.Shaft(num_ports=2),promotes_inputs=[('Nmech','HP_Nmech')])
         self.add_subsystem('perf', pyc.Performance(num_nozzles=2, num_burners=1))
+        if design:
+            # Avion B3: the engine's take-off and climb ratings -- the turbine inlet temperature at maximum
+            # power below 1,500 ft and in the climb (T4_MAX is the cruise rating that sizes the engine).
+            # They do not enter the design-point solve; the off-design engine deck reads them
+            # (engine_deck.rating_t4). Settable like any input. Defaults: see RATING_DEFAULTS_DEGR.
+            self.add_subsystem('ratings', om.ExecComp(
+                ['T4_TAKEOFF_rated = T4_TAKEOFF', 'T4_CLIMB_rated = T4_CLIMB'],
+                T4_TAKEOFF={'val': RATING_DEFAULTS_DEGR['T4_TAKEOFF'], 'units': 'degR'},
+                T4_CLIMB={'val': RATING_DEFAULTS_DEGR['T4_CLIMB'], 'units': 'degR'},
+                T4_TAKEOFF_rated={'units': 'degR'}, T4_CLIMB_rated={'units': 'degR'}),
+                promotes_inputs=['T4_TAKEOFF', 'T4_CLIMB'])
 
         # Now use the explicit connect method to make connections -- connect(<from>, <to>)
 

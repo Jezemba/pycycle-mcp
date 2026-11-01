@@ -71,6 +71,28 @@ HBTF_DESIGN_INPUTS: list[CanonicalInput] = [
         ),
         "category": "performance_target",
     },
+    {
+        "name": "T4_TAKEOFF",
+        "units": "degR",
+        "default": 2857.0,
+        "description": (
+            "Take-off rating: turbine inlet temperature at maximum power at and below 1,500 ft. "
+            "Sets the engine's take-off thrust in the mission (engine deck); does not change "
+            "the design point."
+        ),
+        "category": "rating",
+    },
+    {
+        "name": "T4_CLIMB",
+        "units": "degR",
+        "default": 2857.0,
+        "description": (
+            "Climb rating: turbine inlet temperature at maximum power from 2,000 ft up to the "
+            "design altitude. Sets the engine's climb thrust in the mission (engine deck); does "
+            "not change the design point. T4_MAX is the cruise rating at and above it."
+        ),
+        "category": "rating",
+    },
     # ── Bypass ratio (the one Run #17 missed) ───────────────────────
     {
         "name": "splitter.BPR",

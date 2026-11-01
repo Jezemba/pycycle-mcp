@@ -12,8 +12,9 @@ The table is written in Aviary's engine-deck format (same columns as Aviary's bu
 ``turbofan_28k.deck``: Mach, altitude, throttle, gross thrust, ram drag, fuel flow) so aviary-mcp
 can fly it through ``Aircraft.Engine.DATA_FILE``.
 
-Rating assumption (stated, not tuned): maximum power at every flight condition holds the turbine
-inlet temperature at the design ``T4_MAX``, as pyCycle's own HBTF example does. Part power is a
+Ratings (Avion B3, 2026-11-01): maximum power holds the turbine inlet temperature at the take-off rating
+(``T4_TAKEOFF``) low down, the climb rating (``T4_CLIMB``) in the climb and the design ``T4_MAX`` (cruise) at
+and above the design altitude -- see ``rating_t4``. Part power is a
 fraction of that maximum net thrust.
 """
 
@@ -76,7 +77,8 @@ DECK_COLUMNS = ("Mach_Number (unitless)", "Altitude (ft)", "Throttle (unitless)"
 # Session inputs that describe the design flight condition or the sizing targets. They are copied
 # to the DESIGN point only; the off-design points get their own flight condition and throttle.
 _DESIGN_ONLY_PREFIXES = ("fc.",)
-_DESIGN_ONLY_NAMES = {"Fn_DES", "T4_MAX", "PC", "Fn_max", "LP_Nmech", "HP_Nmech", "splitter.BPR"}
+_DESIGN_ONLY_NAMES = {"Fn_DES", "T4_MAX", "PC", "Fn_max", "LP_Nmech", "HP_Nmech", "splitter.BPR",
+                      "T4_TAKEOFF", "T4_CLIMB"}
 
 
 @dataclass
@@ -110,7 +112,7 @@ class DeckResult:
 # Bump when a change to the builder changes the deck for the same inputs (solver bounds, continuation,
 # point acceptance). Part of the key, so a new builder never overwrites or reuses an old deck
 # (2026-10-31: the BPR-bound fix regenerated a deck under the same key and overwrote the old one).
-DECK_BUILDER_VERSION = 2
+DECK_BUILDER_VERSION = 3   # 3: take-off / climb ratings (2026-11-01)
 
 
 def design_key(design_inputs: dict[str, dict[str, object]], grid: dict[str, Sequence[float]]) -> str:
@@ -177,6 +179,34 @@ def sls_net_thrust(rows: Sequence[dict[str, float]]) -> float | None:
     static = [r["gross_thrust"] - r["ram_drag"] for r in rows
               if abs(r["mach_number"]) < 1e-6 and abs(r["altitude"]) < 1e-6]
     return max(static) if static else None
+
+
+# Ratings (Avion B3, Jessica 2026-11-01: "a hotter take-off/climb setting, not a constant turbine temperature").
+# Maximum power holds T4 at the take-off rating up to the thrust-reduction altitude, at the climb rating up to
+# the design altitude, and at the design T4 (the cruise rating, which sizes the engine) from there up. Short
+# linear ramps join them so the off-design continuation can step across a rating change; at the deck's
+# altitudes the values are exact (0 ft take-off; 2,000 ft up to design - 2,000 ft climb; design alt and above cruise).
+RATING_TAKEOFF_ALT_FT = 1500.0
+RATING_TAKEOFF_RAMP_FT = 500.0
+RATING_CRUISE_RAMP_FT = 2000.0
+
+
+def rating_t4(alt_ft: float, design_inputs: dict[str, dict[str, object]], design_alt_ft: float) -> float:
+    """Turbine inlet temperature (degR) at maximum power at this altitude (take-off / climb / cruise rating)."""
+    t4_cruise = float(design_inputs["T4_MAX"]["value"])  # type: ignore[arg-type]
+    t4_to = float(design_inputs.get("T4_TAKEOFF", {"value": t4_cruise})["value"])  # type: ignore[arg-type]
+    t4_clb = float(design_inputs.get("T4_CLIMB", {"value": t4_cruise})["value"])  # type: ignore[arg-type]
+    xs = [RATING_TAKEOFF_ALT_FT, RATING_TAKEOFF_ALT_FT + RATING_TAKEOFF_RAMP_FT,
+          design_alt_ft - RATING_CRUISE_RAMP_FT, design_alt_ft]
+    ys = [t4_to, t4_clb, t4_clb, t4_cruise]
+    if xs[2] < xs[1]:          # design altitude below the take-off band: climb rating has no room
+        xs, ys = xs[:2] + [max(design_alt_ft, xs[1])], ys[:2] + [t4_cruise]
+    if alt_ft <= xs[0]:
+        return ys[0]
+    for (x0, y0), (x1, y1) in zip(zip(xs, ys), zip(xs[1:], ys[1:])):
+        if alt_ft <= x1:
+            return y0 + (y1 - y0) * (alt_ft - x0) / max(x1 - x0, 1e-9)
+    return ys[-1]
 
 
 def chunk_jobs(machs: Sequence[float], altitudes: Sequence[float], design_mach: float,
@@ -485,6 +515,7 @@ def _run_chunk(args: tuple) -> dict[str, object]:
     def at_full_power(cond: tuple[float, ...]) -> None:
         prob.set_val("OD_part_pwr.PC", 1.0)
         _set_condition(prob, cond[0], cond[1])
+        prob.set_val("OD_full_pwr.T4_MAX", rating_t4(cond[1], design_inputs, design["alt_ft"]), units="degR")
 
     def set_throttle(pc: tuple[float, ...]) -> None:
         prob.set_val("OD_part_pwr.PC", pc[0])
@@ -609,7 +640,9 @@ def write_deck(result: DeckResult, path: str, key: str) -> dict[str, object]:
         "pyCycle-generated engine deck (pycycle-mcp generate_engine_deck, Avion B3)",
         f"design key {key}: Fn_DES {d['Fn_DES']:.1f} lbf at M{d['MN']:.3f} / {d['alt_ft']:.0f} ft, "
         f"BPR {d['BPR']:.4f}, T4 {d['T4_degR']:.1f} degR, design TSFC {d['TSFC']:.5f} lbm/h/lbf",
-        "max power holds T4 at the design T4_MAX; throttle = fraction of max net thrust at that condition",
+        f"max power: T4 {rating_t4(0.0, result.design_inputs, d['alt_ft']):.1f} degR take-off (<= {RATING_TAKEOFF_ALT_FT:.0f} ft), "
+        f"{rating_t4(d['alt_ft'] - RATING_CRUISE_RAMP_FT, result.design_inputs, d['alt_ft']):.1f} degR climb, "
+        f"{d['T4_degR']:.1f} degR cruise (>= design altitude); throttle = fraction of max net thrust there",
         f"Mach 0 rows were solved at M{STATIC_MACH} (pyCycle flight conditions are singular at M 0)",
     ]
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)

@@ -87,3 +87,42 @@ def test_shaft_power_extraction_breaks_size_invariance():
 def test_throttles_must_include_full_power():
     with pytest.raises(ValueError):
         ed.generate_deck({}, throttles=(0.9, 0.5))
+
+
+RATED = {"T4_MAX": {"value": 2857.0, "units": "degR"}, "T4_TAKEOFF": {"value": 3200.0, "units": "degR"},
+         "T4_CLIMB": {"value": 3050.0, "units": "degR"}}
+
+
+def test_rating_schedule_take_off_climb_cruise():
+    t = lambda h: ed.rating_t4(h, RATED, 33000.0)  # noqa: E731
+    assert t(0.0) == t(1500.0) == 3200.0                      # take-off band
+    assert t(1750.0) == pytest.approx((3200.0 + 3050.0) / 2)  # ramp, continuous
+    assert t(2000.0) == t(20000.0) == t(31000.0) == 3050.0    # climb
+    assert t(32000.0) == pytest.approx((3050.0 + 2857.0) / 2)
+    assert t(33000.0) == t(41000.0) == 2857.0                 # cruise = design T4
+
+
+def test_rating_defaults_to_design_t4_when_absent():
+    only = {"T4_MAX": {"value": 2900.0, "units": "degR"}}
+    assert {ed.rating_t4(h, only, 35000.0) for h in (0.0, 10000.0, 40000.0)} == {2900.0}
+
+
+def test_ratings_are_part_of_the_deck_key():
+    grid = {"mach": [0.8], "altitude_ft": [35000.0], "throttle": [1.0]}
+    hotter = dict(RATED, T4_TAKEOFF={"value": 3300.0, "units": "degR"})
+    assert ed.design_key(RATED, grid) != ed.design_key(hotter, grid)
+
+
+def test_hbtf_session_has_settable_rating_inputs():
+    from pycycle_mcp.canonical_inputs import HBTF_DESIGN_INPUTS
+    from pycycle_mcp.tools.create_model import create_cycle_model
+    from pycycle_mcp.tools.variables import set_inputs
+    from pycycle_mcp.session_manager import session_manager
+
+    names = {e["name"] for e in HBTF_DESIGN_INPUTS}
+    assert {"T4_TAKEOFF", "T4_CLIMB"} <= names
+    sid = create_cycle_model({"cycle_type": "turbofan", "mode": "design"})["session_id"]
+    out = set_inputs({"session_id": sid, "values": {"T4_TAKEOFF": 3200.0, "T4_CLIMB": 3050.0}})
+    assert set(out["updated"]) == {"T4_TAKEOFF", "T4_CLIMB"} and not out["skipped"]
+    inputs = ed.session_design_inputs(session_manager.get(sid)[0])
+    assert inputs["T4_TAKEOFF"]["value"] == 3200.0 and inputs["T4_CLIMB"]["units"] == "degR"
