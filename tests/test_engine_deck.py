@@ -122,6 +122,8 @@ def test_hbtf_session_has_settable_rating_inputs():
     names = {e["name"] for e in HBTF_DESIGN_INPUTS}
     assert {"T4_TAKEOFF", "T4_CLIMB"} <= names
     sid = create_cycle_model({"cycle_type": "turbofan", "mode": "design"})["session_id"]
+    fresh = ed.session_design_inputs(session_manager.get(sid)[0])
+    assert (fresh["T4_TAKEOFF"]["value"], fresh["T4_CLIMB"]["value"]) == (3540.0, 3090.0)   # option A defaults
     out = set_inputs({"session_id": sid, "values": {"T4_TAKEOFF": 3200.0, "T4_CLIMB": 3050.0}})
     assert set(out["updated"]) == {"T4_TAKEOFF", "T4_CLIMB"} and not out["skipped"]
     inputs = ed.session_design_inputs(session_manager.get(sid)[0])

@@ -7,9 +7,13 @@ import openmdao.api as om
 import pycycle.api as pyc
 
 
-# Take-off and climb rating temperatures (degR). PROVISIONAL = the design T4 (constant-T4 engine) until
-# Jessica picks the defaults from the calibration against the bench engine (Avion B3, 2026-11-01).
-RATING_DEFAULTS_DEGR = {"T4_TAKEOFF": 2857.0, "T4_CLIMB": 2857.0}
+# Take-off and climb rating temperatures (degR), calibrated to the bench engine (Jessica 2026-11-01, option A):
+# the take-off rating gives the bench deck's sea-level static / cruise thrust ratio 4.873 (interpolated 3,539 degR
+# between 3,457 -> 4.756 and 3,657 -> 5.041); the climb rating is the mean of the two climb matches, 3,182 degR at
+# M0.5/15,000 ft (bench 2.132) and 3,001 degR at M0.7/25,000 ft (bench 1.397) -- within ~5% of both. Cycle: the
+# framework's design point M0.78/33,000 ft, cruise T4 2,857 degR (b3_scratch/logs_calibrate_ratings.log, ws8).
+# 3,540 degR = 1,967 K is hotter than a real engine runs (no cooling bleeds in this cycle, B234). Agents may change both.
+RATING_DEFAULTS_DEGR = {"T4_TAKEOFF": 3540.0, "T4_CLIMB": 3090.0}
 
 
 class HBTF(pyc.Cycle):

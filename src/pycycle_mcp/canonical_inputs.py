@@ -74,7 +74,7 @@ HBTF_DESIGN_INPUTS: list[CanonicalInput] = [
     {
         "name": "T4_TAKEOFF",
         "units": "degR",
-        "default": 2857.0,
+        "default": 3540.0,
         "description": (
             "Take-off rating: turbine inlet temperature at maximum power at and below 1,500 ft. "
             "Sets the engine's take-off thrust in the mission (engine deck); does not change "
@@ -85,7 +85,7 @@ HBTF_DESIGN_INPUTS: list[CanonicalInput] = [
     {
         "name": "T4_CLIMB",
         "units": "degR",
-        "default": 2857.0,
+        "default": 3090.0,
         "description": (
             "Climb rating: turbine inlet temperature at maximum power from 2,000 ft up to the "
             "design altitude. Sets the engine's climb thrust in the mission (engine deck); does "
