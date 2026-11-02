@@ -82,3 +82,21 @@ def test_envelope_holes_only_inside_the_mission_envelope():
     cells.remove({"mach": 0.8, "alt_ft": 41000.0})   # outside: above 38,000 ft
     cells.remove({"mach": 0.2, "alt_ft": 0.0})       # inside
     assert deck.envelope_holes({"grid": grid, "cells": cells}) == [{"mach": 0.2, "alt_ft": 0.0}]
+
+
+def test_deck_without_static_row_is_refused_with_the_cause(monkeypatch, tmp_path):
+    """Sweep 2026-11-01: T4_TAKEOFF 3,690 degR gave a deck with no Mach-0 sea-level row; aviary refused it."""
+    _fake_session(monkeypatch)
+    monkeypatch.setenv("PYCYCLE_DECK_DIR", str(tmp_path))
+    monkeypatch.setattr(deck.ed, "session_design_inputs",
+                        lambda problem: dict(INPUTS, T4_TAKEOFF={"value": 3690.0, "units": "degR"}))
+    gen_inputs, _ = ed.deck_inputs(dict(INPUTS, T4_TAKEOFF={"value": 3690.0, "units": "degR"}))
+    key = ed.design_key(gen_inputs, _grid())
+    (tmp_path / f"deck_{key}.deck").write_text("# deck\n")
+    (tmp_path / f"deck_{key}.json").write_text(json.dumps({
+        "deck_path": str(tmp_path / f"deck_{key}.deck"), "design_key": key, "reference_fn_des_lbf": 5900.0,
+        "size_normalised": True, "design": DESIGN, "sls_net_thrust_lbf": None, "n_points": 1100, "n_failed": 30,
+        "wall_seconds": 1.0, "grid": _grid(), "cells": []}))
+    out = deck.generate_engine_deck({"session_id": "s"})
+    assert out["error"]["type"] == "DeckNotUsable"
+    assert "no sea-level static" in out["error"]["message"] and "T4_TAKEOFF 3690" in out["error"]["message"]

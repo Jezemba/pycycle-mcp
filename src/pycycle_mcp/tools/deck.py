@@ -39,6 +39,28 @@ def envelope_holes(sidecar: dict) -> list[dict[str, float]]:
             if (m, a) not in present]
 
 
+def unusable_reason(sidecar: dict, inputs: dict | None = None) -> str | None:
+    """Why aviary could not fly this deck, or None. Checked here so the caller is told the cause, not aviary's
+    file-format refusal (sweep 2026-11-01: T4_TAKEOFF 3,690 degR -> full power did not solve at Mach 0-0.1 at sea
+    level -> no static row -> aviary refused the deck)."""
+    if sidecar.get("sls_net_thrust_lbf") is None:
+        t4 = ((inputs or {}).get("T4_TAKEOFF") or {}).get("value")
+        rating = f" (T4_TAKEOFF {t4:g} degR)" if isinstance(t4, (int, float)) else ""
+        return ("The engine has no sea-level static solution: full power did not solve at Mach 0 at sea level"
+                f"{rating}, so the mission cannot use this engine (aviary needs the static take-off thrust). "
+                "Lower T4_TAKEOFF, or change the cycle, and run again.")
+    return None
+
+
+def _checked(sidecar: dict, inputs: dict, cached: bool) -> dict[str, object]:
+    """The summary, or a structured refusal naming why the deck cannot fly (the file is kept either way)."""
+    why = unusable_reason(sidecar, inputs)
+    if why:
+        return error_response("DeckNotUsable", why, details={"deck_file": sidecar.get("deck_path"),
+                                                            "n_failed": sidecar.get("n_failed")})
+    return _summary(sidecar, cached)
+
+
 def _summary(sidecar: dict, cached: bool) -> dict[str, object]:
     d = sidecar["design"]
     return {
@@ -84,7 +106,8 @@ def generate_engine_deck(payload: dict[str, object]) -> dict[str, object]:
         side_path = os.path.splitext(path)[0] + ".json"
         if os.path.isfile(path) and os.path.isfile(side_path):
             with open(side_path, encoding="utf-8") as fh:
-                return _summary(json.load(fh), cached=True)
+                side = json.load(fh)
+            return _checked(side, inputs, cached=True)
 
         design = ed.solve_design_point(inputs)
         rel = abs(design["Fn_lbf"] - design["Fn_DES"]) / max(abs(design["Fn_DES"]), 1e-9)
@@ -105,7 +128,7 @@ def generate_engine_deck(payload: dict[str, object]) -> dict[str, object]:
             json.dump(sidecar, fh, indent=1, sort_keys=True)
         LOGGER.info("engine deck %s: %d points, %d failed, %.0f s", key, sidecar["n_points"],
                     sidecar["n_failed"], sidecar["wall_seconds"])
-        return _summary(sidecar, cached=False)
+        return _checked(sidecar, inputs, cached=False)
     except Exception as exc:  # pragma: no cover - surfaced as a structured error
         LOGGER.exception("generate_engine_deck failed")
         return to_error(exc)
